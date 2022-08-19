@@ -54,6 +54,7 @@
             this.lblStatus = new System.Windows.Forms.Label();
             this.busyIndicator = new MRG.Controls.UI.LoadingCircle();
             this.cmbEndpointBaseUrl = new System.Windows.Forms.ComboBox();
+            this.btnClearBodyFiles = new System.Windows.Forms.Button();
             this.SuspendLayout();
             // 
             // label1
@@ -119,9 +120,9 @@
             // 
             this.btnBrowseBodyFiles.Location = new System.Drawing.Point(12, 582);
             this.btnBrowseBodyFiles.Name = "btnBrowseBodyFiles";
-            this.btnBrowseBodyFiles.Size = new System.Drawing.Size(110, 37);
+            this.btnBrowseBodyFiles.Size = new System.Drawing.Size(124, 37);
             this.btnBrowseBodyFiles.TabIndex = 14;
-            this.btnBrowseBodyFiles.Text = "Browse...";
+            this.btnBrowseBodyFiles.Text = "Add...";
             this.btnBrowseBodyFiles.UseVisualStyleBackColor = true;
             this.btnBrowseBodyFiles.Click += new System.EventHandler(this.btnBrowseBodyFiles_Click);
             // 
@@ -290,6 +291,16 @@
             this.cmbEndpointBaseUrl.Text = "https://pdfconvertmicroservice2.azurewebsites.net/convertpdf";
             this.cmbEndpointBaseUrl.SelectedIndexChanged += new System.EventHandler(this.cmbEndpointBaseUrl_SelectedIndexChanged);
             // 
+            // btnClearBodyFiles
+            // 
+            this.btnClearBodyFiles.Location = new System.Drawing.Point(142, 582);
+            this.btnClearBodyFiles.Name = "btnClearBodyFiles";
+            this.btnClearBodyFiles.Size = new System.Drawing.Size(124, 37);
+            this.btnClearBodyFiles.TabIndex = 14;
+            this.btnClearBodyFiles.Text = "Clear";
+            this.btnClearBodyFiles.UseVisualStyleBackColor = true;
+            this.btnClearBodyFiles.Click += new System.EventHandler(this.btnClearBodyFiles_Click);
+            // 
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
@@ -313,6 +324,7 @@
             this.Controls.Add(this.btnGetRequest);
             this.Controls.Add(this.btnAuthenticate);
             this.Controls.Add(this.btnPostRequest);
+            this.Controls.Add(this.btnClearBodyFiles);
             this.Controls.Add(this.btnBrowseBodyFiles);
             this.Controls.Add(this.lstBodyFiles);
             this.Controls.Add(this.label4);
@@ -358,6 +370,7 @@
         private System.Windows.Forms.Label lblStatus;
         private MRG.Controls.UI.LoadingCircle busyIndicator;
         private System.Windows.Forms.ComboBox cmbEndpointBaseUrl;
+        private System.Windows.Forms.Button btnClearBodyFiles;
     }
 }
 

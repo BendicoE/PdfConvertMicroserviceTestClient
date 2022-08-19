@@ -22,12 +22,13 @@ namespace PdfConvertMicroserviceTestClient
 {
     public partial class MainForm : Form
     {
-        List<string> uploadFiles = new List<string>();
+        BindingList<string> uploadFiles = new BindingList<string>();
         bool authenticated = false;
 
         public MainForm()
         {
             InitializeComponent();
+            lstBodyFiles.DataSource = uploadFiles;
         }
 
         private void btnBrowseBodyFiles_Click(object sender, EventArgs e)
@@ -37,8 +38,8 @@ namespace PdfConvertMicroserviceTestClient
 
             if (dlg.ShowDialog() == DialogResult.OK)
             {
-                uploadFiles = dlg.FileNames.ToList();
-                lstBodyFiles.DataSource = uploadFiles;
+                foreach (string filename in dlg.FileNames)
+                    uploadFiles.Add(filename);
             }
         }
 
@@ -288,6 +289,11 @@ namespace PdfConvertMicroserviceTestClient
         {
             btnGetRequest.Enabled = authenticated;
             btnPostRequest.Enabled = authenticated;
+        }
+
+        private void btnClearBodyFiles_Click(object sender, EventArgs e)
+        {
+            uploadFiles.Clear();
         }
     }
 
