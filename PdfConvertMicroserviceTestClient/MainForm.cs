@@ -28,6 +28,7 @@ namespace PdfConvertMicroserviceTestClient
         BindingList<string> _outputFolders = new BindingList<string>();
         BackgroundWorker _requestWorker = null;
         BindingList<Server> _servers = new BindingList<Server>();
+        int _selectedRequestIndex = -1;
 
         public class Server
         {
@@ -38,6 +39,7 @@ namespace PdfConvertMicroserviceTestClient
         public MainForm()
         {
             InitializeComponent();
+
             _requestWorker = new BackgroundWorker();
             _requestWorker.DoWork += _requestWorker_DoWork;
             _requestWorker.RunWorkerCompleted += _requestWorker_RunWorkerCompleted;
@@ -71,10 +73,6 @@ namespace PdfConvertMicroserviceTestClient
             cmbEndpointBaseUrl.DataSource = _servers;
             if (_servers.Count > 0)
                 chkAuthenticate.Checked = _servers[0].Authenticate;
-
-            if (Properties.Settings.Default.EndpointBaseUrlSelectedIndex < cmbEndpointBaseUrl.Items.Count)
-                cmbEndpointBaseUrl.SelectedIndex = Properties.Settings.Default.EndpointBaseUrlSelectedIndex;
-
 
             txtEndpoint.Text = Properties.Settings.Default.Endpoint;
             txtParameters.Text = Properties.Settings.Default.Parameters;
@@ -110,8 +108,9 @@ namespace PdfConvertMicroserviceTestClient
 
                 if (Properties.Settings.Default.SelectedRequestIndex >= 0 && Properties.Settings.Default.SelectedRequestIndex < _requests.Count)
                 {
-                    cmbRequest.SelectedIndex = Properties.Settings.Default.SelectedRequestIndex;
-                    lstBodyFiles.DataSource = _requests[cmbRequest.SelectedIndex].Files;
+                    _selectedRequestIndex = Properties.Settings.Default.SelectedRequestIndex;
+                    cmbRequest.SelectedIndex = _selectedRequestIndex;
+                    lstBodyFiles.DataSource = _requests[_selectedRequestIndex].Files;
                 }
             }
 
@@ -125,6 +124,9 @@ namespace PdfConvertMicroserviceTestClient
             }
 
             cmbOutputFolder.DataSource = _outputFolders;
+
+            if (Properties.Settings.Default.EndpointBaseUrlSelectedIndex < cmbEndpointBaseUrl.Items.Count)
+                cmbEndpointBaseUrl.SelectedIndex = Properties.Settings.Default.EndpointBaseUrlSelectedIndex;
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -172,16 +174,17 @@ namespace PdfConvertMicroserviceTestClient
             busyIndicator.Active = true;
             btnSendRequest.Enabled = false;
 
-            if (cmbRequest.SelectedIndex >= 0)
+            if (_selectedRequestIndex >= 0)
             {
                 RequestArg request = new RequestArg
                 {
+                    Iteration = 0,
                     Name = cmbRequest.Text,
                     Method = rbtnPost.Checked ? Method.Post : Method.Get,
                     BaseUrl = cmbEndpointBaseUrl.Text,
                     Endpoint = txtEndpoint.Text,
                     Parameters = txtParameters.Text,
-                    Files = _requests[cmbRequest.SelectedIndex].Files.ToList(),
+                    Files = _requests[_selectedRequestIndex].Files.ToList(),
                     ApimSubscriptionKey = chkAuthenticate.Checked ? txtApimSubscriptionKey.Text : String.Empty,
                     AuthToken = chkAuthenticate.Checked ? txtAuthToken.Text : string.Empty,
                     OutputFolder = cmbOutputFolder.Text
@@ -198,29 +201,36 @@ namespace PdfConvertMicroserviceTestClient
         {
             List<RequestArg> requests = new List<RequestArg>();
 
-            foreach (Request r in _requests)
+            for (int i = 0; i < numRunRepeats.Value; i++)
             {
-                RequestArg request = new RequestArg
+                foreach (Request r in _requests)
                 {
-                    Name = r.Name,
-                    Method = r.Type == "POST" ? Method.Post : Method.Get,
-                    BaseUrl = cmbEndpointBaseUrl.Text,
-                    Endpoint = r.Endpoint,
-                    Parameters = r.Parameters,
-                    Files = r.Files.ToList(),
-                    ApimSubscriptionKey = chkAuthenticate.Checked ? txtApimSubscriptionKey.Text : String.Empty,
-                    AuthToken = chkAuthenticate.Checked ? txtAuthToken.Text : string.Empty,
-                    OutputFolder = cmbOutputFolder.Text
-                };
+                    RequestArg request = new RequestArg
+                    {
+                        Iteration = i,
+                        Name = r.Name,
+                        Method = r.Type == "POST" ? Method.Post : Method.Get,
+                        BaseUrl = cmbEndpointBaseUrl.Text,
+                        Endpoint = r.Endpoint,
+                        Parameters = r.Parameters,
+                        Files = r.Files.ToList(),
+                        ApimSubscriptionKey = chkAuthenticate.Checked ? txtApimSubscriptionKey.Text : String.Empty,
+                        AuthToken = chkAuthenticate.Checked ? txtAuthToken.Text : string.Empty,
+                        OutputFolder = cmbOutputFolder.Text
+                    };
 
-                requests.Add(request);
+                    requests.Add(request);
+                }
             }
+
+            _running = true;
 
             _requestWorker.RunWorkerAsync(requests);
         }
 
         public struct RequestArg
         {
+            public int Iteration;
             public string Name;
             public Method Method;
             public string BaseUrl;
@@ -238,14 +248,19 @@ namespace PdfConvertMicroserviceTestClient
 
             if (requests.Count == 1 && string.IsNullOrEmpty(requests[0].OutputFolder))
             {
-                RestResponse response = SendRequest(requests[0].Name, requests[0].Method, requests[0].BaseUrl, requests[0].Endpoint, requests[0].Parameters, requests[0].Files, requests[0].ApimSubscriptionKey, requests[0].AuthToken, requests[0].OutputFolder);
+                RestResponse response = SendRequest(requests[0].Name, requests[0].Method, requests[0].BaseUrl, requests[0].Endpoint, requests[0].Parameters, requests[0].Files, requests[0].ApimSubscriptionKey, requests[0].AuthToken, requests[0].OutputFolder, 0);
                 e.Result = response;
             }
             else
             {
                 foreach (RequestArg request in requests)
                 {
-                    SendRequest(request.Name, request.Method, request.BaseUrl, request.Endpoint, request.Parameters, request.Files, request.ApimSubscriptionKey, request.AuthToken, request.OutputFolder);
+                    SendRequest(request.Name, request.Method, request.BaseUrl, request.Endpoint, request.Parameters, request.Files, request.ApimSubscriptionKey, request.AuthToken, request.OutputFolder, request.Iteration);
+                    if (_abortRun)
+                    {
+                        AddOutput("***Run aborted***", Color.DarkOrange);
+                        break;
+                    }
                 }
                 e.Result = null;
             }
@@ -253,6 +268,9 @@ namespace PdfConvertMicroserviceTestClient
         
         private void _requestWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
+            _running = false;
+            _abortRun = false;
+
             Cursor.Current = Cursors.Default;
             busyIndicator.Visible = false;
             busyIndicator.Active = false;
@@ -262,29 +280,58 @@ namespace PdfConvertMicroserviceTestClient
             {
                 RestResponse response = e.Result as RestResponse;
 
-                var contentDispositionHeaderValue = response.ContentHeaders.FirstOrDefault(x => x.Name == "Content-Disposition")?.Value;
-                string contentDispositionString = Convert.ToString(contentDispositionHeaderValue);
-                string fileName = "Response.pdf";
-                if (!string.IsNullOrWhiteSpace(contentDispositionString))
+                if (response.ContentType == "application/pdf")
                 {
-                    ContentDisposition contentDisposition = new ContentDisposition(contentDispositionString);
-                    fileName = contentDisposition.FileName;
-                }
-
-                if (string.IsNullOrEmpty(cmbOutputFolder.Text))
-                {
-                    SaveFileDialog dlg = new SaveFileDialog();
-                    dlg.FileName = fileName;
-                    dlg.OverwritePrompt = true;
-                    if (dlg.ShowDialog() == DialogResult.OK)
+                    var contentDispositionHeaderValue = response.ContentHeaders.FirstOrDefault(x => x.Name == "Content-Disposition")?.Value;
+                    string contentDispositionString = Convert.ToString(contentDispositionHeaderValue);
+                    string fileName = "Response.pdf";
+                    if (!string.IsNullOrWhiteSpace(contentDispositionString))
                     {
-                        File.WriteAllBytes(dlg.FileName, response.RawBytes);
+                        ContentDisposition contentDisposition = new ContentDisposition(contentDispositionString);
+                        fileName = contentDisposition.FileName;
                     }
+
+                    if (string.IsNullOrEmpty(cmbOutputFolder.Text))
+                    {
+                        SaveFileDialog dlg = new SaveFileDialog();
+                        dlg.FileName = fileName;
+                        dlg.OverwritePrompt = true;
+                        if (dlg.ShowDialog() == DialogResult.OK)
+                        {
+                            File.WriteAllBytes(dlg.FileName, response.RawBytes);
+                        }
+                    }
+                }
+                else if (response.ContentType == ContentType.Json)
+                {
+                    string json = (response.Content);
+
+                    var writerOptions = new JsonWriterOptions
+                    {
+                        Indented = true
+                    };
+
+                    try
+                    {
+                        using (var jsonDoc = JsonDocument.Parse(json))
+                        {
+                            using (var ms = new MemoryStream())
+                            {
+                                using (var writer = new Utf8JsonWriter(ms, writerOptions))
+                                {
+                                    jsonDoc.WriteTo(writer);
+                                    writer.Flush();
+                                    txtJsonResponse.Text = Encoding.UTF8.GetString(ms.ToArray());
+                                }
+                            }
+                        }
+                    }
+                    catch { }
                 }
             }
         }
 
-        private RestResponse SendRequest(string name, Method method, string baseUrl, string endpoint, string parameters, List<string> files, string apimSubscriptionKey, string authToken, string outputFolder)
+        private RestResponse SendRequest(string name, Method method, string baseUrl, string endpoint, string parameters, List<string> files, string apimSubscriptionKey, string authToken, string outputFolder, int iteration)
         {
             var client = new RestClient(baseUrl);
             if (method == Method.Post)
@@ -324,7 +371,7 @@ namespace PdfConvertMicroserviceTestClient
                     }
 
                     AddOutput("-----------------------------------------------");
-                    AddOutput($"Sending request '{name}':  POST /{endpoint}{parameters} ({files.Count} files in body)", Color.DarkSlateBlue);
+                    AddOutput($"Sending request '{name}' (i={iteration}):  POST /{endpoint}{parameters} ({files.Count} files in body)", Color.DarkSlateBlue);
 
                     DateTime startTime = DateTime.Now;
 
@@ -400,60 +447,94 @@ namespace PdfConvertMicroserviceTestClient
                     }
                 }
             }
-            else // GET
+            else if (method == Method.Get)
             {
+                try
+                {
+                    AddOutput("-----------------------------------------------");
+                    AddOutput($"Sending request '{name}' (i={iteration}):  GET /{endpoint}{parameters} ({files.Count} files in body)", Color.DarkSlateBlue);
 
+                    DateTime startTime = DateTime.Now;
+
+                    var request = new RestRequest(endpoint, Method.Get);
+                    RestResponse response = client.Execute(request);
+
+                    TimeSpan timeSpent = DateTime.Now - startTime;
+
+                    AddOutput($"Request finished in {timeSpent.Minutes}m {timeSpent.Seconds}.{timeSpent.Milliseconds}s", Color.DarkOliveGreen);
+
+                    if (response != null && response.StatusCode == System.Net.HttpStatusCode.InternalServerError)
+                    {
+                        AddOutput($"Request failed: Internal Server Error ({response.StatusCode})", Color.DarkRed);
+                    }
+                    else if (response != null && response.StatusCode == System.Net.HttpStatusCode.GatewayTimeout)
+                    {
+                        AddOutput($"Request failed: Gateway Timeout ({response.StatusCode})", Color.DarkRed);
+                    }
+                    else if (response != null && response.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+                    {
+                        AddOutput($"Request failed: Request Timeout ({response.StatusCode})", Color.DarkRed);
+                    }
+
+                    if (Directory.Exists(outputFolder))
+                    {
+                        if (response.ContentType == ContentType.Json)
+                        {
+                            string json = (response.Content);
+
+                            var writerOptions = new JsonWriterOptions
+                            {
+                                Indented = true
+                            };
+
+                            try
+                            {
+                                using (var jsonDoc = JsonDocument.Parse(json))
+                                {
+                                    using (var ms = new MemoryStream())
+                                    {
+                                        using (var writer = new Utf8JsonWriter(ms, writerOptions))
+                                        {
+                                            jsonDoc.WriteTo(writer);
+                                            writer.Flush();
+
+                                            string saveFilename = Path.Combine(outputFolder, Path.ChangeExtension(endpoint, "json"));
+                                            int i = 1;
+                                            while (File.Exists(saveFilename))
+                                            {
+                                                saveFilename = Path.Combine(outputFolder, $"{endpoint} ({i}).json");
+                                                i++;
+                                            }
+                                            File.WriteAllText(saveFilename, Encoding.UTF8.GetString(ms.ToArray()));
+                                            AddOutput($"Auto saved as {Path.GetFileName(saveFilename)} in {outputFolder}", Color.DarkOliveGreen);
+                                            return null;
+
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    else
+                    {
+                        return response;
+                    }
+
+
+                    return response;
+                }
+                catch (Exception ex)
+                {
+                    AddOutput($"Request failed: {ex.Message}", Color.DarkRed);
+                }
             }
 
             return null;
         }
 
-        private void btnGetRequest_Click(object sender, EventArgs e)
-        {
-            var client = new RestClient(cmbEndpointBaseUrl.Text);
-            var request = new RestRequest(txtEndpoint.Text, Method.Get);
-            var response = client.Execute(request);
-
-            if (response.ContentType == ContentType.Json)
-            {
-                string json = (response.Content);
-
-                var writerOptions = new JsonWriterOptions
-                {
-                    Indented = true
-                };
-
-                try
-                {
-                    using (var jsonDoc = JsonDocument.Parse(json))
-                    {
-                        using (var ms = new MemoryStream())
-                        {
-                            using (var writer = new Utf8JsonWriter(ms, writerOptions))
-                            {
-                                jsonDoc.WriteTo(writer);
-                                writer.Flush();
-                                txtJsonResponse.Text = Encoding.UTF8.GetString(ms.ToArray());
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
-
-        private void UpdateEndpointBaseUrl()
-        {
-            if (!cmbEndpointBaseUrl.Items.Contains(cmbEndpointBaseUrl.Text))
-            {
-                cmbEndpointBaseUrl.Items.Add(cmbEndpointBaseUrl.Text);
-                cmbEndpointBaseUrl.SelectedIndex = cmbEndpointBaseUrl.Items.Count - 1;
-            }
-        }
-
         private void btnAuthenticate_Click(object sender, EventArgs e)
         {
-            UpdateEndpointBaseUrl();
             Authenticate();
         }
 
@@ -512,7 +593,11 @@ namespace PdfConvertMicroserviceTestClient
 
         public void AddOutput(string text, Color color, bool newline = true)
         {
-            rtxtOutput.Invoke((MethodInvoker)(() => rtxtOutput.AppendText(text + (newline ? Environment.NewLine : ""), color)));
+            rtxtOutput.Invoke((MethodInvoker)(() => {
+                rtxtOutput.AppendText(text + (newline ? Environment.NewLine : ""), color);
+                rtxtOutput.SelectionStart = rtxtOutput.Text.Length;
+                rtxtOutput.ScrollToCaret();
+            }));
         }
 
         private void cmbEndpointBaseUrl_SelectedIndexChanged(object sender, EventArgs e)
@@ -525,7 +610,7 @@ namespace PdfConvertMicroserviceTestClient
 
         private void btnSaveRequest_Click(object sender, EventArgs e)
         {
-            if (!string.IsNullOrEmpty(cmbRequest.Text) && cmbRequest.SelectedIndex >= 0)
+            if (!string.IsNullOrEmpty(cmbRequest.Text) && _selectedRequestIndex >= 0)
             {
                 List<string> files = new List<string>();
                 foreach (string file in lstBodyFiles.Items)
@@ -534,7 +619,7 @@ namespace PdfConvertMicroserviceTestClient
                         files.Add(file);
                 }
 
-                _requests[cmbRequest.SelectedIndex] = new Request
+                _requests[_selectedRequestIndex] = new Request
                 {
                     Name = cmbRequest.Text,
                     Type = rbtnPost.Checked ? "POST" : "GET",
@@ -547,20 +632,22 @@ namespace PdfConvertMicroserviceTestClient
 
         private void btnRemoveRequest_Click(object sender, EventArgs e)
         {
-            if (cmbRequest.SelectedIndex != -1)
+            if (_selectedRequestIndex != -1)
             {
-                _requests.RemoveAt(cmbRequest.SelectedIndex);
+                _requests.RemoveAt(_selectedRequestIndex);
             }
         }
 
         private void cmbRequest_SelectedIndexChanged(object sender, EventArgs e)
         {
+            _selectedRequestIndex = cmbRequest.SelectedIndex;
+
             if (cmbRequest.Items.Count > 0)
             {
-                Request r = _requests[cmbRequest.SelectedIndex];
+                Request r = _requests[_selectedRequestIndex];
                 txtEndpoint.Text = r.Endpoint;
                 txtParameters.Text = r.Parameters;
-                lstBodyFiles.DataSource = _requests[cmbRequest.SelectedIndex].Files;
+                lstBodyFiles.DataSource = _requests[_selectedRequestIndex].Files;
                 rbtnGet.Checked = r.Type == "GET";
                 rbtnPost.Checked = r.Type == "POST";
             }
@@ -570,21 +657,22 @@ namespace PdfConvertMicroserviceTestClient
         {
             Request r = new Request
             {
-                Name = cmbRequest.Text,
+                Name = "New Request",
                 Type = "POST",
                 Endpoint = "Convert",
                 Parameters = "?Format=pdfa2b&OCR=false",
                 Files = new BindingList<string>()
             };
             _requests.Add(r);
-            cmbRequest.SelectedIndex = _requests.Count - 1;
-            //cmbRequest.SelectAll();
-            //cmbRequest.Focus();
+            _selectedRequestIndex = _requests.Count - 1;
+            cmbRequest.SelectedIndex = _selectedRequestIndex;
+            cmbRequest.SelectAll();
+            cmbRequest.Focus();
         }
 
         private void btnAddBodyFiles_Click(object sender, EventArgs e)
         {
-            if (cmbRequest.SelectedIndex >= 0)
+            if (_selectedRequestIndex >= 0)
             {
                 OpenFileDialog dlg = new OpenFileDialog();
                 dlg.Multiselect = true;
@@ -592,15 +680,15 @@ namespace PdfConvertMicroserviceTestClient
                 if (dlg.ShowDialog() == DialogResult.OK)
                 {
                     foreach (string filename in dlg.FileNames)
-                        _requests[cmbRequest.SelectedIndex].Files.Add(filename);
+                        _requests[_selectedRequestIndex].Files.Add(filename);
                 }
             }
         }
 
         private void btnRemoveBodyFile_Click(object sender, EventArgs e)
         {
-            if (lstBodyFiles.SelectedIndex >= 0 && cmbRequest.SelectedIndex >= 0)
-                _requests[cmbRequest.SelectedIndex].Files.RemoveAt(lstBodyFiles.SelectedIndex);
+            if (lstBodyFiles.SelectedIndex >= 0 && _selectedRequestIndex >= 0)
+                _requests[_selectedRequestIndex].Files.RemoveAt(lstBodyFiles.SelectedIndex);
         }
 
         private void btnAddOutputFolder_Click(object sender, EventArgs e)
@@ -652,6 +740,15 @@ namespace PdfConvertMicroserviceTestClient
         {
             if (cmbEndpointBaseUrl.SelectedIndex >= 0)
                 _servers[cmbEndpointBaseUrl.SelectedIndex].Authenticate = chkAuthenticate.Checked;
+        }
+
+        private bool _running = false;
+        private bool _abortRun = false;
+
+        private void btnAbortRun_Click(object sender, EventArgs e)
+        {
+            if (_running && !_abortRun)
+                _abortRun = true;
         }
     }
 
