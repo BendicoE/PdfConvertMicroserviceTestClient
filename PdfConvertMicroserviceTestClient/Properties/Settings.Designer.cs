@@ -141,5 +141,41 @@ namespace PdfConvertMicroserviceTestClient.Properties {
                 this["EndpointBaseUrlSelectedIndex"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string Requests {
+            get {
+                return ((string)(this["Requests"]));
+            }
+            set {
+                this["Requests"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public int SelectedRequestIndex {
+            get {
+                return ((int)(this["SelectedRequestIndex"]));
+            }
+            set {
+                this["SelectedRequestIndex"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string OutputFolders {
+            get {
+                return ((string)(this["OutputFolders"]));
+            }
+            set {
+                this["OutputFolders"] = value;
+            }
+        }
     }
 }
