@@ -520,7 +520,7 @@ namespace PdfConvertMicroserviceTestClient
             // avoid modifying the CurrencyManager's Position when the change
             // in selection was caused by the CurrencyManager in the first
             // place. But it doesn't hurt to be defensive...)
-            if (!m_changingIndex)
+            if (!m_changingIndex && index >= 0)
             {
                 this.Invoke((Action)(() =>
                 {

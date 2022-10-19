@@ -36,10 +36,14 @@ namespace PdfConvertMicroserviceTestClient
         BindingList<string> _outputFolders = new BindingList<string>();
         BackgroundWorker _requestWorker = null;
         BindingList<Server> _servers = new BindingList<Server>();
+        List<WorkerArg> _works = new List<WorkerArg>();
+
         int _selectedRequestIndex = -1;
         Timer _timer = null;
         private Guid _userId = Guid.Empty;
         private BindingList<Job> _activeJobs { get; set; }
+        private Dictionary<Guid, DateTime> _jobStartTime = new Dictionary<Guid, DateTime>();
+        private Dictionary<Guid, TimeSpan> _jobElapsedTime = new Dictionary<Guid, TimeSpan>();
 
         public class Server
         {
@@ -151,12 +155,13 @@ namespace PdfConvertMicroserviceTestClient
             blvJobs.DataSource = _activeJobs;
             blvJobs.HeaderStyle = ColumnHeaderStyle.Nonclickable;
             blvJobs.Columns[0].Width = 200;
-            blvJobs.Columns[1].Width = 250;
+            blvJobs.Columns[1].Width = 200;
             blvJobs.Columns[2].Width = 80;
+            blvJobs.Columns[3].Width = 120;
 
             _timer = new Timer();
             _timer.Tick += _timer_Tick;
-            _timer.Interval = 1000;
+            _timer.Interval = 3000;
             _timer.Start();
         }
 
@@ -169,65 +174,114 @@ namespace PdfConvertMicroserviceTestClient
             }
         };
 
-
         private void _timer_Tick(object sender, EventArgs e)
         {
+            _timer.Stop();
+
             if (_activeJobs.Count > 0)
             {
                 try
                 {
                     foreach (Job job in _activeJobs)
                     {
+                        if (job.Status == "Delivered" || job.Status == "Failed")
+                            continue;
+
                         var request = new RestRequest("JobStatus");
                         request.AddQueryParameter("UserId", _userId.ToString());
                         request.AddQueryParameter("JobId", job.Id);
                         RestResponse response = _client.Execute(request);
 
-                        DocProcessStatus jobStatus = JsonConvert.DeserializeObject<DocProcessStatus>(response.Content, new JsonSerializerSettings
+                        if (response.StatusCode == HttpStatusCode.OK)
                         {
-                            TypeNameHandling = TypeNameHandling.Objects,
-                            SerializationBinder = commandTypesBinder
-                        });
-
-                        Job job_ = _activeJobs.Where<Job>(j => j.Id == jobStatus.JobID).FirstOrDefault();
-
-                        if (job_ != null)
-                        {
-                            int i = _activeJobs.IndexOf(job_);
-                            _activeJobs[i].Status = jobStatus.Status.ToString();
-
-                            if (jobStatus.Status == DocProcessStatus.StatusType.Delivered && !job_.ResultSaved)
+                            if (!string.IsNullOrEmpty(response.Content))
                             {
-                                _activeJobs[i].ResultSaved = true;
-
-                                WorkerArg work = new WorkerArg
+                                DocProcessStatus jobStatus = JsonConvert.DeserializeObject<DocProcessStatus>(response.Content, new JsonSerializerSettings
                                 {
-                                    Iteration = i,
-                                    Name = jobStatus.Title + " - Saving",
-                                    Method = Method.Get,
-                                    BaseUrl = cmbEndpointBaseUrl.Text,
-                                    Endpoint = "JobResult",
-                                    Parameters = $"?userId={_userId}&jobId={job_.Id}",
-                                    ParametersInQuery = true,
-                                    Files = null,
-                                    ApimSubscriptionKey = string.Empty,
-                                    AuthToken = string.Empty,
-                                    OutputFolder = cmbOutputFolder.Text,
-                                    APIv2 = true,
-                                    Action = WorkerArg.WorkAction.DownloadResult
-                                };
-                                List<WorkerArg> works = new List<WorkerArg>();
-                                works.Add(work);
-                                _requestWorker.RunWorkerAsync(works);
+                                    TypeNameHandling = TypeNameHandling.Objects,
+                                    SerializationBinder = commandTypesBinder
+                                });
+
+                                Job job_ = _activeJobs.Where<Job>(j => j.Id == jobStatus.JobID).FirstOrDefault();
+
+                                if (job_ != null)
+                                {
+                                    int i = _activeJobs.IndexOf(job_);
+                                    _activeJobs[i].Status = jobStatus.Status.ToString();
+
+                                    if (!job_.ResultSaved)
+                                    {
+                                        if (!_jobStartTime.ContainsKey(job_.Id))
+                                        {
+                                            _jobStartTime.Add(job_.Id, DateTime.Now);
+                                            _jobElapsedTime.Add(job_.Id, TimeSpan.FromSeconds(0));
+                                        }
+                                        else
+                                        {
+                                            _jobElapsedTime[job_.Id] = DateTime.Now - _jobStartTime[job_.Id];
+                                            _activeJobs[i].ElapsedTime = _jobElapsedTime[job_.Id];
+                                        }
+                                    }
+
+                                    if (jobStatus.Status == DocProcessStatus.StatusType.Delivered && !job_.ResultSaved)
+                                    {
+                                        _activeJobs[i].ResultSaved = true;
+
+                                        if (_jobStartTime.ContainsKey(job_.Id))
+                                        {
+                                            _jobElapsedTime[job_.Id] = DateTime.Now - _jobStartTime[job_.Id];
+                                            _activeJobs[i].ElapsedTime = _jobElapsedTime[job_.Id];
+                                        }
+
+                                        WorkerArg work = new WorkerArg
+                                        {
+                                            Iteration = i,
+                                            Name = jobStatus.Title + " - Saving",
+                                            Method = Method.Get,
+                                            BaseUrl = cmbEndpointBaseUrl.Text,
+                                            Endpoint = "JobResult",
+                                            Parameters = $"?userId={_userId}&jobId={job_.Id}",
+                                            ParametersInQuery = true,
+                                            Files = null,
+                                            ApimSubscriptionKey = string.Empty,
+                                            AuthToken = string.Empty,
+                                            OutputFolder = cmbOutputFolder.Text,
+                                            APIv2 = true,
+                                            Action = WorkerArg.WorkAction.DownloadResult
+                                        };
+                                        _works.Add(work); // Put in queue
+                                    }
+                                }
                             }
+                            else
+                                _activeJobs.Remove(job);
+                        }
+                        else
+                        {
+                            //Job job_ = _activeJobs.Where<Job>(j => j.Id == job.Id).FirstOrDefault();
+
+                            //if (job_ != null)
+                            //{
+                            //    _activeJobs.Remove(job_);
+                            //}
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    AddOutput($"A problem occurred: {ex.Message}");
+                   // AddOutput($"A problem occurred: {ex.Message}");
                 }
             }
+
+            if (!_requestWorker.IsBusy && _works.Count > 0)
+            {
+                List<WorkerArg> works = new List<WorkerArg>();
+                works.Add(_works[0]);
+                _works.RemoveAt(0);
+                _requestWorker.RunWorkerAsync(works);
+            }
+
+            _timer.Start();
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -270,11 +324,6 @@ namespace PdfConvertMicroserviceTestClient
 
         private void btnSendRequest_Click(object sender, EventArgs e)
         {
-            Cursor.Current = Cursors.WaitCursor;
-            busyIndicator.Visible = true;
-            busyIndicator.Active = true;
-            btnSendRequest.Enabled = false;
-
             if (_selectedRequestIndex >= 0)
             {
                 WorkerArg work = new WorkerArg
@@ -287,23 +336,24 @@ namespace PdfConvertMicroserviceTestClient
                     Parameters = txtParameters.Text,
                     ParametersInQuery = true,
                     Files = _requests[_selectedRequestIndex].Files.ToList(),
-                    ApimSubscriptionKey = chkAuthenticate.Checked ? txtApimSubscriptionKey.Text : String.Empty,
+                    ApimSubscriptionKey = chkAuthenticate.Checked ? txtApimSubscriptionKey.Text : string.Empty,
                     AuthToken = chkAuthenticate.Checked ? txtAuthToken.Text : string.Empty,
                     OutputFolder = cmbOutputFolder.Text,
                     APIv2 = chkAPIv2.Checked,
                     Action = WorkerArg.WorkAction.SendRequest
                 };
 
-                List<WorkerArg> works = new List<WorkerArg>();
-                works.Add(work);
-
-                _requestWorker.RunWorkerAsync(works);
+                _works.Add(work);
             }
         }
 
         private void btnRunCollection_Click(object sender, EventArgs e)
         {
-            List<WorkerArg> works = new List<WorkerArg>();
+            if (_requestWorker.IsBusy)
+            {
+                MessageBox.Show("The request worker is busy, please try again later");
+                return;
+            }
 
             for (int i = 0; i < numRunRepeats.Value; i++)
             {
@@ -326,13 +376,11 @@ namespace PdfConvertMicroserviceTestClient
                         Action = WorkerArg.WorkAction.SendRequest
                     };
 
-                    works.Add(work);
+                    _works.Add(work);
                 }
             }
 
             _running = true;
-
-            _requestWorker.RunWorkerAsync(works);
         }
 
         public struct WorkerArg
@@ -358,6 +406,8 @@ namespace PdfConvertMicroserviceTestClient
 
         private void _requestWorker_DoWork(object sender, DoWorkEventArgs e)
         {
+            SetBusy(true);
+
             List<WorkerArg> work = e.Argument as List<WorkerArg>;
 
             foreach (WorkerArg w in work)
@@ -479,16 +529,13 @@ namespace PdfConvertMicroserviceTestClient
                 }
             }
         }
-        
+
         private void _requestWorker_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e)
         {
             _running = false;
             _abortRun = false;
 
-            Cursor.Current = Cursors.Default;
-            busyIndicator.Visible = false;
-            busyIndicator.Active = false;
-            btnSendRequest.Enabled = true;
+            SetBusy(false);
 
             if (e.Result != null)
             {
@@ -516,7 +563,7 @@ namespace PdfConvertMicroserviceTestClient
                         }
                     }
                 }
-                else if (w.Response.ContentType == ContentType.Json)
+                else if (w.Response != null && w.Response.ContentType == ContentType.Json)
                 {
                     string json = (w.Response.Content);
 
@@ -557,6 +604,10 @@ namespace PdfConvertMicroserviceTestClient
                     {
                         AddOutput($"An error occurred: {ex.Message}", Color.DarkRed);
                     }
+                }
+                else if (w.Response != null)
+                {
+                    AddOutput($"Response: {w.Response.StatusCode.ToString()}", Color.Magenta);
                 }
             }
         }
@@ -826,8 +877,21 @@ namespace PdfConvertMicroserviceTestClient
                             {
                                 Id = jobId,
                                 Name = name,
-                                Status = "Created"
+                                Status = "Created",
+                                ElapsedTime = TimeSpan.Zero
                             });
+
+                            if (!_jobStartTime.ContainsKey(jobId))
+                            {
+                                _jobStartTime.Add(jobId, DateTime.Now);
+                                _jobElapsedTime.Add(jobId, TimeSpan.Zero);
+                            }
+                            else
+                            {
+                                _jobStartTime[jobId] = DateTime.Now;
+                                _jobElapsedTime[jobId] = TimeSpan.Zero;
+                            }
+
                             AddOutput($"Job submitted, ID = {jobId}", Color.DarkOliveGreen);
                         }
                     }
@@ -919,6 +983,71 @@ namespace PdfConvertMicroserviceTestClient
             Authenticate();
         }
 
+        void InitJobList()
+        {
+            BindingList<Job> activeJobs = new BindingList<Job>();
+
+            RestRequest request = new RestRequest("JobList");
+            request.AddParameter("userId", _userId.ToString());
+
+            RestResponse response = _client.Execute(request);
+
+            List<Guid> jobIdList = JsonConvert.DeserializeObject<List<Guid>>(response.Content, new JsonSerializerSettings
+            {
+                TypeNameHandling = TypeNameHandling.Objects,
+                SerializationBinder = commandTypesBinder
+            });
+
+            foreach (Guid jobId in jobIdList)
+            {
+                request = new RestRequest("JobStatus");
+                request.AddParameter("userId", _userId.ToString());
+                request.AddParameter("jobId", jobId.ToString());
+
+                response = _client.Execute(request);
+
+                if (response.StatusCode == HttpStatusCode.OK)
+                {
+                    DocProcessStatus jobStatus = JsonConvert.DeserializeObject<DocProcessStatus>(response.Content, new JsonSerializerSettings
+                    {
+                        TypeNameHandling = TypeNameHandling.Objects,
+                        SerializationBinder = commandTypesBinder
+                    });
+
+                    if (jobStatus != null)
+                    {
+                        TimeSpan elapsedTime = TimeSpan.Zero;
+
+                        if (_jobElapsedTime.ContainsKey(jobId))
+                        {
+                            elapsedTime = _jobElapsedTime[jobId];
+                        }
+
+                        activeJobs.Add(new Job
+                        {
+                            Id = jobId,
+                            Name = jobStatus.Title,
+                            ResultSaved = jobStatus.Status == DocProcessStatus.StatusType.Delivered,
+                            Status = jobStatus.Status.ToString(),
+                            ElapsedTime = elapsedTime
+                        });
+                    }
+                }
+                else
+                {
+                    AddOutput($"An error occurred: {response.ErrorMessage}", Color.DarkRed);
+                }
+            }
+            _activeJobs = activeJobs;
+            blvJobs.DataSource = _activeJobs;
+            blvJobs.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+            blvJobs.Columns[0].Width = 200;
+            blvJobs.Columns[1].Width = 200;
+            blvJobs.Columns[2].Width = 80;
+            blvJobs.Columns[3].Width = 120;
+            blvJobs.Update();
+        }
+
         private void Authenticate()
         {
             if (cmbEndpointBaseUrl.SelectedIndex < 0 || cmbEndpointBaseUrl.SelectedIndex >= _servers.Count)
@@ -932,7 +1061,50 @@ namespace PdfConvertMicroserviceTestClient
                 try
                 {
                     _client = new RestClient(_servers[cmbEndpointBaseUrl.SelectedIndex].BaseUrl);
-                    var request = new RestRequest("ValidateUser");
+                    RestRequest request = new RestRequest();
+
+                    try
+                    {
+                        RestResponse response = _client.Execute(request);
+                        if (!string.IsNullOrEmpty(response.Content))
+                        {
+                            if (response != null && response.ContentType == ContentType.Json)
+                            {
+                                string json = (response.Content);
+
+                                var writerOptions = new JsonWriterOptions
+                                {
+                                    Indented = true
+                                };
+
+                                try
+                                {
+                                    using (var jsonDoc = JsonDocument.Parse(json))
+                                    {
+                                        using (var ms = new MemoryStream())
+                                        {
+                                            using (var writer = new Utf8JsonWriter(ms, writerOptions))
+                                            {
+                                                jsonDoc.WriteTo(writer);
+                                                writer.Flush();
+                                                txtJsonResponse.Text = Encoding.UTF8.GetString(ms.ToArray());
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    AddOutput($"An error occurred: {ex.Message}", Color.DarkRed);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AddOutput($"An error occurred: {ex.Message}", Color.DarkRed);
+                    }
+
+                    request = new RestRequest("ValidateUser");
                     request.AddParameter("username", "admin");
                     request.AddParameter("password", "admin");
 
@@ -940,11 +1112,20 @@ namespace PdfConvertMicroserviceTestClient
                     {
                         RestResponse response = _client.Execute(request);
 
-                        using (var jsonDoc = JsonDocument.Parse(response.Content))
+                        if (string.IsNullOrEmpty(response.Content))
                         {
-                            JsonElement root = jsonDoc.RootElement;
-                            JsonElement e = root.GetProperty("userId");
-                            _userId = Guid.Parse(e.GetString());
+                            AddOutput($"ValidateUser failed on {_servers[cmbEndpointBaseUrl.SelectedIndex].BaseUrl}: Status Code = {response.StatusCode}", Color.DarkRed);
+                        }
+                        else
+                        {
+                            using (var jsonDoc = JsonDocument.Parse(response.Content))
+                            {
+                                JsonElement root = jsonDoc.RootElement;
+                                JsonElement e = root.GetProperty("userId");
+                                _userId = Guid.Parse(e.GetString());
+
+                                InitJobList();
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -961,9 +1142,8 @@ namespace PdfConvertMicroserviceTestClient
             else
             {
                 lblStatus.Text = "Authenticating, please wait...";
-                Cursor.Current = Cursors.WaitCursor;
-                busyIndicator.Visible = true;
-                busyIndicator.Active = true;
+
+                SetBusy(true);
 
                 try
                 {
@@ -1004,14 +1184,28 @@ namespace PdfConvertMicroserviceTestClient
                 }
             }
 
-            Cursor.Current = Cursors.Default;
-            busyIndicator.Visible = false;
-            busyIndicator.Active = false;
+            SetBusy(false);
+        }
+
+        void SetBusy(bool busy)
+        {
+            Cursor.Current = busy ? Cursors.WaitCursor : Cursors.Default;
+            busyIndicator.Invoke((MethodInvoker)(() => {
+                busyIndicator.Visible = busy;
+                busyIndicator.Active = busy;
+            }));
+            btnSendRequest.Invoke((MethodInvoker)(() => {
+                btnSendRequest.Enabled = !busy;
+            }));
         }
 
         public void AddOutput(string text, bool newline = true)
         {
-            rtxtOutput.Invoke((MethodInvoker)(() => rtxtOutput.AppendText(text + (newline ? Environment.NewLine : ""))));
+            rtxtOutput.Invoke((MethodInvoker)(() => {
+                rtxtOutput.AppendText(text + (newline ? Environment.NewLine : ""));
+                rtxtOutput.SelectionStart = rtxtOutput.Text.Length;
+                rtxtOutput.ScrollToCaret();
+            }));
         }
 
         public void AddOutput(string text, Color color, bool newline = true)
@@ -1115,7 +1309,10 @@ namespace PdfConvertMicroserviceTestClient
         private void btnRemoveBodyFile_Click(object sender, EventArgs e)
         {
             if (lstBodyFiles.SelectedIndex >= 0 && _selectedRequestIndex >= 0)
+            {
                 _requests[_selectedRequestIndex].Files.RemoveAt(lstBodyFiles.SelectedIndex);
+                lstBodyFiles.Update();
+            }
         }
 
         private void btnAddOutputFolder_Click(object sender, EventArgs e)
@@ -1209,6 +1406,28 @@ namespace PdfConvertMicroserviceTestClient
                 });
             }
         }
+
+        private void btnPurgeAllJobs_Click(object sender, EventArgs e)
+        {
+            if (_userId != Guid.Empty && _client != null)
+            {
+                RestRequest request = new RestRequest("PurgeAllJobs", Method.Delete);
+                request.AddParameter("userId", _userId.ToString());
+
+                try
+                {
+                    RestResponse response = _client.Execute(request);
+                    AddOutput(response.Content);
+
+                    InitJobList();
+                }
+                catch (Exception ex)
+                {
+                    AddOutput($"A problem occurred: {ex.Message}", Color.DarkRed);
+                }
+
+            }
+        }
     }
 
     public class Job : INotifyPropertyChanged
@@ -1269,6 +1488,25 @@ namespace PdfConvertMicroserviceTestClient
                 {
                     status = value;
                     NotifyPropertyChanged("Status");
+                }
+            }
+        }
+
+        private TimeSpan elapsedTime;
+
+        public TimeSpan ElapsedTime
+        {
+            get
+            {
+                return elapsedTime;
+            }
+
+            set
+            {
+                if (value != elapsedTime)
+                {
+                    elapsedTime = value;
+                    NotifyPropertyChanged("ElapsedTime");
                 }
             }
         }
